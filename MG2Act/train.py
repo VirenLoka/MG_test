@@ -217,7 +217,7 @@ def train_fixed_split(train_csv, val_csv, args, device):
 
 def main():
     parser = argparse.ArgumentParser(description="MG2Act fixed split training script")
-    parser.add_argument("--folder", type=str, required=True, help="Folder path containing train.csv, val.csv, test.csv")
+    parser.add_argument("--folder", type=str, required=True, help="Folder path containing train.csv, val.csv")
     parser.add_argument("--epochs", type=int, default=150, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=3e-5, help="Learning rate")
@@ -291,7 +291,6 @@ def main():
     folder = Path(args.folder)
     train_csv = folder / "train.csv"
     val_csv = folder / "val.csv"
-    test_csv = folder / "test.csv"
     
     for file_path in [train_csv, val_csv, test_csv]:
         if not file_path.exists():

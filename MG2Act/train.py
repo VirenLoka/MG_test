@@ -121,7 +121,10 @@ def train_fixed_split(train_csv, val_csv, args, device):
             y = y.view(-1)
 
             if pred.shape[0] != y.shape[0]:
-                raise RuntimeError("Severe dimension mismatch error! The number of predicted values ({pred.shape[0]}) does not match the number of labels ({y.shape[0]}).") 
+                    raise RuntimeError(
+                        f"Prediction/label size mismatch: "
+                        f"{pred.shape[0]} predictions vs {y.shape[0]} labels."
+                    )
 
             loss_vec = crit_train(pred, y)
             loss = loss_vec.mean()
@@ -197,7 +200,6 @@ def train_fixed_split(train_csv, val_csv, args, device):
     print(f"\nTraining complete:")
     print(f"  Best val loss: {best_val:.4f}")
     print(f"  Best val MAE: {best_val_mae:.4f}")
-    print(f"  Corresponding test MAE: {best_test_mae:.4f}")
     print(f"  Training time: {total_time/60:.2f} minutes")
 
     # Save training metadata
@@ -328,9 +330,6 @@ def main():
         args,
         device,
     )
-
-    # Save detailed training results (including complete regression metrics)
-    save_detailed_results_with_metrics(train_csv, val_csv, test_csv, args, device)
     
 
 

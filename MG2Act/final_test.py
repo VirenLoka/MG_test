@@ -65,7 +65,7 @@ def main():
     parser.add_argument("--device", type=str, default="cuda:0")
 
     args = parser.parse_args()
-
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     # 防止无意中反复覆盖最终测试结果
     if args.output.exists():
         raise FileExistsError(

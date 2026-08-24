@@ -151,6 +151,17 @@ The output CSV will include:
 
 The experiments were conducted on a single NVIDIA GeForce RTX 3090 GPU (24 GB) under Linux, using CUDA 12.9 and a compatible NVIDIA driver (version 575.51.03 or later). Under this configuration, training with the settings described above took approximately 12 minutes. Inference on 100 samples took approximately 11 seconds. Actual runtime may vary with protein sequence length, batch size, hardware configuration and software environment.
 
+### Tested environment
+
+MG2Act was tested on Ubuntu 22.04 LTS with Python 3.12.7,
+PyTorch 2.8.0, PyTorch Geometric 2.7.0, ESM 3.2.2.post2,
+RDKit 2025.03.2 and CUDA 12.9. The tested hardware was a single
+NVIDIA GeForce RTX 3090 GPU with 24 GB of memory. The NVIDIA driver
+version was 580.95.05.
+
+Creating the Conda environment from `env.yaml` took approximately
+48 minutes on the tested system, excluding model
+weight download time.
 
 ## Citation
 

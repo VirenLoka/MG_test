@@ -149,8 +149,8 @@ The output CSV will include:
 
 ## Hardware and runtime
 
-The experiments were conducted on a single NVIDIA GeForce RTX 3090 GPU (24 GB) under Linux, using CUDA 12.9 and a compatible NVIDIA driver (version 575.51.03 or later). Under this configuration, training with the settings described above took approximately 12 minutes. Inference on 100 samples took approximately 11 seconds. Actual runtime may vary with protein sequence length, batch size, hardware configuration and software environment. 翻译
----
+The experiments were conducted on a single NVIDIA GeForce RTX 3090 GPU (24 GB) under Linux, using CUDA 12.9 and a compatible NVIDIA driver (version 575.51.03 or later). Under this configuration, training with the settings described above took approximately 12 minutes. Inference on 100 samples took approximately 11 seconds. Actual runtime may vary with protein sequence length, batch size, hardware configuration and software environment.
+
 
 ## Citation
 

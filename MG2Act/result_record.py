@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import math
 
-def save_training_meta(args, best_val, best_val_mae, best_test_mae, ep, best_epoch, total_time, threshold):
+def save_training_meta(args, best_val, best_val_mae, ep, best_epoch, total_time, threshold):
     """Save training metadata to results_meta.json"""
     meta = {
         "epochs_planned": int(args.epochs),
@@ -12,8 +12,8 @@ def save_training_meta(args, best_val, best_val_mae, best_test_mae, ep, best_epo
         "best_epoch": int(best_epoch),
         "best_val_loss": float(best_val),
         "best_val_mae": float(best_val_mae),
-        "best_test_mae": float(best_test_mae),
         "training_time_min": round(total_time / 60.0, 2),
+        "model_selection_criterion": "validation_loss",
         "threshold_used": float(threshold),
     }
     with open(Path(args.out) / "results_meta.json", "w", encoding="utf-8") as f:
@@ -105,7 +105,12 @@ def evaluate_regression_metrics(model, loader, device):
     }
 
 def save_detailed_results_with_metrics(train_csv, val_csv, test_csv, args, device):
-    """Save complete training results with detailed regression metrics"""
+    """
+    Load the validation-selected checkpoint and perform final evaluation.
+
+    The test set is accessed only after training, early stopping,
+    hyperparameter selection and checkpoint selection are complete.
+    """
 
     # Recreate datasets for evaluation
     from .dataset import MG2ActDataset, collate_samples
@@ -175,6 +180,11 @@ def save_detailed_results_with_metrics(train_csv, val_csv, test_csv, args, devic
     # Save to results.json
     results = {
         "strategy": "fixed_split",
+        "model_selection_criterion": "validation_loss",
+        "test_evaluation_stage": "after_model_selection",
+        "test_used_for_training": False,
+        "test_used_for_early_stopping": False,
+        "test_used_for_model_selection": False,
         "train_csv": str(train_csv),
         "val_csv": str(val_csv),
         "test_csv": str(test_csv),

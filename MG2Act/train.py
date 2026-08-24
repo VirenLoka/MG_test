@@ -15,15 +15,16 @@ from .result_record import save_training_meta, save_detailed_results_with_metric
 import random
 
 # Remove duplicate function definitions
-def train_fixed_split(train_csv, val_csv, test_csv, args, device):
-    """Train using fixed train/val/test files"""
-    # Reduce print output during initialization
+def train_fixed_split(train_csv, val_csv, args, device):
+    """
+    Train on the training split and select the best checkpoint
+    using the validation split only.
+    """
     if not args.quiet:
         print(f"\n{'='*80}")
         print(f"Starting training (fixed split)")
         print(f"Train: {train_csv}")
         print(f"Val: {val_csv}")
-        print(f"Test: {test_csv}")
         print(f"{'='*80}")
     
     # Load datasets
@@ -35,22 +36,15 @@ def train_fixed_split(train_csv, val_csv, test_csv, args, device):
         val_csv,
         col_activity="Score"
     )
-    test_ds = MG2ActDataset(
-        test_csv,
-        col_activity="Score"
-    )
     
     tr_loader = DataLoader(train_ds, batch_size=args.batch_size, 
                           shuffle=True, collate_fn=collate_samples)
     va_loader = DataLoader(val_ds, batch_size=args.batch_size, 
                           shuffle=False, collate_fn=collate_samples)
-    te_loader = DataLoader(test_ds, batch_size=args.batch_size, 
-                          shuffle=False, collate_fn=collate_samples)
     
     if not args.quiet:
         print(f"Train: {len(train_ds)} samples")
         print(f"Val: {len(val_ds)} samples")
-        print(f"Test: {len(test_ds)} samples\n")
     
     # Initialize model
     # Default custom functional groups (user-provided)
@@ -90,7 +84,6 @@ def train_fixed_split(train_csv, val_csv, test_csv, args, device):
     # Training loop
     best_val = float("inf")
     best_val_mae = float("inf")
-    best_test_mae = float("inf")
     best_epoch = 0
     patience_counter = 0
     threshold = 0.5  # Default threshold for compatibility
@@ -172,9 +165,7 @@ def train_fixed_split(train_csv, val_csv, test_csv, args, device):
             best_val_mae = val_mae
             best_epoch = ep
             patience_counter = 0
-
-            # Calculate test_mae only when val_loss improves (fastest mode)
-            best_test_mae = evaluate(model, te_loader, device, crit_eval, return_full=False, mae_only=True)
+            
 
             out_dir = Path(args.out)
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -210,9 +201,16 @@ def train_fixed_split(train_csv, val_csv, test_csv, args, device):
     print(f"  Training time: {total_time/60:.2f} minutes")
 
     # Save training metadata
-    save_training_meta(args, best_val, best_val_mae, best_test_mae, ep, best_epoch, total_time, threshold)
+    save_training_meta(args, best_val, best_val_mae, ep, best_epoch, total_time, threshold)
     
-    return best_val, best_val_mae, best_test_mae, total_time, threshold
+    return (
+        best_val,
+        best_val_mae,
+        total_time,
+        ep,
+        best_epoch,
+        threshold,
+    )
 
 
 def main():
@@ -293,10 +291,11 @@ def main():
     val_csv = folder / "val.csv"
     test_csv = folder / "test.csv"
     
-    for f in [train_csv, val_csv, test_csv]:
-        if not f.exists():
-            print(f"Error: File not found: {f}")
-            return
+    for file_path in [train_csv, val_csv, test_csv]:
+        if not file_path.exists():
+            raise FileNotFoundError(
+                f"Required file not found: {file_path}"
+            )
     
     if not args.quiet:
         print(f"\n{'='*80}")
@@ -316,8 +315,18 @@ def main():
         print(f"{'='*80}\n")
     
     # Training
-    best_val, best_val_mae, best_test_mae, total_time, threshold = train_fixed_split(
-        train_csv, val_csv, test_csv, args, device
+    (
+        best_val,
+        best_val_mae,
+        total_time,
+        epochs_done,
+        best_epoch,
+        threshold,
+    ) = train_fixed_split(
+        train_csv,
+        val_csv,
+        args,
+        device,
     )
 
     # Save detailed training results (including complete regression metrics)

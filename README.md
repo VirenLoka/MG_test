@@ -3,9 +3,9 @@ This resource library is presented together with the paper "MG2Act: A Mechanism-
 
 This repository contains the implementation of **MG2Act**, a deep learning framework for predicting Molecular Glue degradation activity by integrating:
 
-- Protein sequence encoding (ESM-C)
-- Molecular graph representation (GNN)
-- Functional-group-aware attention fusion
+- frozen ESM-C protein representations for the E3 ligase and target protein;
+- a graph neural network (GNN) molecular encoder;
+- functional-group-aware sequential cross-attention.
 
 ![image](https://github.com/Zzy522/MG2Act/blob/main/Picture.png)
 ---
@@ -49,7 +49,7 @@ Download ESM-C weights from:
 
 https://huggingface.co/EvolutionaryScale/esmc-300m-2024-12/tree/main/data
 
-Then place the downloaded files into the `data/weight/` directory.
+Then place the downloaded files into the `data/weights/` directory.
 
 ### 2.2 MG2Act Weights
 
@@ -147,6 +147,9 @@ The output CSV will include:
 - Ensure ESM-C weights are correctly placed in `data/weight/` before running.
 - RDKit and PyG installation may vary by system/CUDA; verify compatibility first.
 
+## Hardware and runtime
+
+The experiments were conducted on a single NVIDIA GeForce RTX 3090 GPU (24 GB) under Linux, using CUDA 12.9 and a compatible NVIDIA driver (version 575.51.03 or later). Under this configuration, training with the settings described above took approximately 12 minutes. Inference on 100 samples took approximately 11 seconds. Actual runtime may vary with protein sequence length, batch size, hardware configuration and software environment. 翻译
 ---
 
 ## Citation

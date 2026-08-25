@@ -292,7 +292,7 @@ def main():
     train_csv = folder / "train.csv"
     val_csv = folder / "val.csv"
     
-    for file_path in [train_csv, val_csv, test_csv]:
+    for file_path in [train_csv, val_csv]:
         if not file_path.exists():
             raise FileNotFoundError(
                 f"Required file not found: {file_path}"

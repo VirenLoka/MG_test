@@ -1,0 +1,223 @@
+# MG_CrossAttn base configuration.
+#
+# Dataset-specific files (dc50.yaml, dmax.yaml) inherit from this via the
+# `defaults: base.yaml` key and override only what differs. Every model and
+# training component is configurable here; nothing is hard-coded in the
+# modules. Override any leaf from the CLI with dotted keys, e.g.
+#   python -m src.train --config configs/dc50.yaml \
+#       --set model.gat.n_layers=6 train.optimizer.lr=1e-4
+
+experiment:
+  name: mg_crossattn
+  seed: 42
+  # auto -> cuda if available, else mps, else cpu. Force with cuda/mps/cpu.
+  device: auto
+  # Written to runs/<name>/<dataset>/ ; fold subdirectories are created inside.
+  output_dir: MG_CrossAttn/runs
+  # cudnn/cublas determinism. Slower, but makes fold results reproducible.
+  deterministic: true
+
+paths:
+  # All relative paths resolve against the repository root (MG_CrossAttn/..).
+  data_csv: null                      # set per dataset
+  protein_map: MG_data/protein_structures_mapped.csv
+  esm_cache: MG_CrossAttn/cache/esm
+
+data:
+  smiles_col: canonical_smiles
+  target_col: target
+  label_col: null                     # set per dataset
+  # Gene symbol -> sequence lookup columns in protein_map.
+  protein_key_col: Gene_Name
+  protein_seq_col: FASTA_Sequence
+  num_workers: 0                      # >0 needs the graph cache warmed first
+  pin_memory: false
+  # Cache RDKit-derived graphs in memory. 4010 small molecules is cheap and
+  # saves re-featurising every epoch.
+  cache_graphs: true
+
+# ---------------------------------------------------------------------------
+# Molecule graph featurisation. Each name in these lists contributes a block
+# to the atom/bond feature vector; drop a name to ablate it. Input dimensions
+# are derived from these lists at runtime, never hard-coded.
+# ---------------------------------------------------------------------------
+featurizer:
+  atom_features:
+    - atomic_num
+    - degree
+    - formal_charge
+    - num_hs
+    - hybridization
+    - chirality
+    - aromatic
+    - in_ring
+  bond_features:
+    - bond_type
+    - conjugated
+    - in_ring
+    - stereo
+  # Atoms outside this list fall into a shared "other" slot.
+  atomic_num_vocab: [5, 6, 7, 8, 9, 14, 15, 16, 17, 35, 53]
+  # Adds a reverse edge for every bond, so message passing is symmetric.
+  add_self_loops: false
+  explicit_hydrogens: false
+
+# ---------------------------------------------------------------------------
+# Splits: targets partitioned into folds, then scaffold-disjointness imposed.
+# ---------------------------------------------------------------------------
+split:
+  mode: target_disjoint_cv
+  n_folds: 5
+  seed: 42
+  scaffold_disjoint: true
+  # Paralogous targets share chemical series. Splitting a family across folds
+  # both destroys rows (SMARCA2/SMARCA4 share 235 dc50 scaffolds) and biases
+  # what survives, because only the family's non-shared chemistry remains.
+  # Each inner list is packed into one fold as a single unit.
+  group_paralogs: true
+  paralog_families:
+    - [SMARCA2, SMARCA4]
+    - [IKZF1, IKZF2, IKZF3, IKZF4]
+  # Ties when a scaffold straddles splits: the split earlier in this list wins.
+  scaffold_tie_priority: [train, val, test]
+
+# ---------------------------------------------------------------------------
+# Protein tower: frozen ESM-2, embeddings extracted once and cached.
+# Fine-tuning is deliberately unsupported - there are only 27 distinct
+# proteins in this dataset, so ESM would memorise them immediately.
+# ---------------------------------------------------------------------------
+esm:
+  checkpoint: facebook/esm2_t33_650M_UR50D
+  # Which hidden layer to cache. -1 is the final layer.
+  layer: -1
+  embed_dim: 1280                     # must match the checkpoint
+  # fp16 halves the ~104 MB cache; it is upcast to fp32 when loaded.
+  cache_dtype: float16
+  batch_size: 1                       # 27 sequences, up to 1651 residues
+  # Longer proteins are cropped to this many residues (null = keep all).
+  max_residues: null
+  # Strip the tokenizer's BOS/EOS so cached length equals sequence length.
+  strip_special_tokens: true
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
+model:
+  # Shared width of both streams after projection; cross-attention requires
+  # the molecule and protein streams to agree on this.
+  d_model: 256
+  dropout: 0.1
+
+  # Graph attention transformer over the molecule graph.
+  gat:
+    n_layers: 4
+    n_heads: 8
+    # GATv2 fixes the static-attention limitation of the original GAT.
+    conv_type: gatv2                  # gatv2 | gat | transformer_conv
+    use_edge_features: true
+    # Feed-forward expansion inside each transformer block.
+    ffn_mult: 2
+    dropout: 0.1
+    attention_dropout: 0.1
+    # Pre-norm blocks train more stably at depth than post-norm.
+    norm: pre
+    residual: true
+
+  protein:
+    # Projects cached ESM embeddings (esm.embed_dim) down to d_model.
+    projection: linear                # linear | mlp
+    dropout: 0.1
+    layer_norm: true
+    # Optional learned downsampling of the residue axis before attention.
+    # null keeps every residue.
+    pool_stride: null
+
+  cross_attention:
+    n_blocks: 2
+    n_heads: 8
+    # bidirectional | mol_to_prot | prot_to_mol
+    direction: bidirectional
+    ffn_mult: 2
+    dropout: 0.1
+    attention_dropout: 0.1
+    norm: pre
+    residual: true
+
+  readout:
+    # attention = learned query pooling; also mean | max | mean_max
+    mol_pool: attention
+    prot_pool: attention
+    # Extra interaction terms appended to [mol, prot] before the classifier.
+    # Options: product, difference (both elementwise).
+    interactions: [product]
+
+  classifier:
+    hidden_dims: [256, 128]
+    activation: gelu
+    dropout: 0.2
+    batch_norm: false
+    # Binary classification -> a single logit, used with BCEWithLogitsLoss.
+    n_outputs: 1
+
+# ---------------------------------------------------------------------------
+# Training
+# ---------------------------------------------------------------------------
+train:
+  epochs: 60
+  batch_size: 32
+  # Evaluated with no_grad, so it can exceed batch_size.
+  eval_batch_size: 64
+  grad_clip_norm: 1.0
+  accumulate_grad_batches: 1
+  # Mixed precision. Ignored on CPU; on MPS it is honoured only for float16.
+  amp: false
+
+  loss:
+    name: bce_with_logits
+    # Sets pos_weight to n_negative/n_positive from the training fold. These
+    # folds run from 1.3% to 90% positive, so this matters.
+    class_weighting: balanced         # balanced | none
+    label_smoothing: 0.0
+
+  optimizer:
+    name: adamw                       # adamw | adam | sgd
+    lr: 3.0e-4
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  scheduler:
+    name: cosine                      # cosine | linear | plateau | none
+    warmup_epochs: 3
+    min_lr: 1.0e-6
+    # plateau only
+    patience: 5
+    factor: 0.5
+
+  early_stopping:
+    enabled: true
+    # A target-disjoint val fold can be a single target whose base rate is
+    # nothing like train's, which makes val loss a poor stopping signal;
+    # a ranking metric is more robust to that shift.
+    monitor: val_roc_auc
+    mode: max
+    patience: 12
+    min_delta: 0.001
+
+  checkpoint:
+    save_best: true
+    save_last: false
+    monitor: val_roc_auc
+    mode: max
+
+eval:
+  threshold: 0.5
+  metrics: [roc_auc, pr_auc, accuracy, balanced_accuracy, precision, recall, f1, mcc]
+  # Write per-row test probabilities for every fold.
+  save_predictions: true
+
+logging:
+  level: INFO
+  log_every_n_steps: 20
+  # Appends one JSON object per epoch to runs/.../history.jsonl
+  jsonl_history: true

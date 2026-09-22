@@ -1,0 +1,19 @@
+# dc50 binary degradation-potency classification.
+# 4010 rows, 3309 unique molecules, 23 targets, 66.9% positive.
+defaults: base.yaml
+
+experiment:
+  name: mg_crossattn_dc50
+
+paths:
+  data_csv: MG_data/patglue_dc50_clean.csv
+
+data:
+  label_col: dc50_label
+
+# The dc50 baselines depended more on structure than on target identity
+# (MACCS-only 0.749 vs AAC-only 0.564 test ROC-AUC under target-disjoint CV),
+# so the molecule tower carries more of the load here.
+model:
+  gat:
+    n_layers: 4

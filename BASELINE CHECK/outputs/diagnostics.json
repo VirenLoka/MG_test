@@ -1,0 +1,349 @@
+{
+  "seed": 42,
+  "datasets": {
+    "dc50": {
+      "ablation": {
+        "target_onehot_only": {
+          "val": 0.8648,
+          "test": 0.8686,
+          "n_features": 22
+        },
+        "maccs_only": {
+          "val": 0.9722,
+          "test": 0.9675,
+          "n_features": 166
+        },
+        "maccs_plus_target": {
+          "val": 0.9778,
+          "test": 0.9736,
+          "n_features": 188
+        }
+      },
+      "similarity": {
+        "median_max_similarity": 0.8358,
+        "mean_max_similarity": 0.8309,
+        "frac_above_0.9": 0.199,
+        "frac_above_0.7": 0.8947,
+        "bands": {
+          "near-duplicate (>=0.9)": {
+            "n": 121,
+            "roc_auc": 0.9837,
+            "accuracy": 0.9008
+          },
+          "close analog [0.7,0.9)": {
+            "n": 423,
+            "roc_auc": 0.9737,
+            "accuracy": 0.9078
+          },
+          "related [0.5,0.7)": {
+            "n": 63,
+            "roc_auc": 0.9523,
+            "accuracy": 0.9048
+          },
+          "distinct (<0.5)": {
+            "n": 1,
+            "roc_auc": null,
+            "accuracy": 1.0
+          }
+        }
+      },
+      "target_skew": [
+        {
+          "target": "VAV1",
+          "n": 816,
+          "positive_rate": 0.9032,
+          "skew": 0.8064
+        },
+        {
+          "target": "CSNK1A1",
+          "n": 736,
+          "positive_rate": 0.9253,
+          "skew": 0.8505
+        },
+        {
+          "target": "SMARCA4",
+          "n": 602,
+          "positive_rate": 0.1595,
+          "skew": 0.6811
+        },
+        {
+          "target": "GSPT1",
+          "n": 559,
+          "positive_rate": 0.7227,
+          "skew": 0.4454
+        },
+        {
+          "target": "SMARCA2",
+          "n": 494,
+          "positive_rate": 0.3421,
+          "skew": 0.3158
+        },
+        {
+          "target": "BRAF",
+          "n": 159,
+          "positive_rate": 0.956,
+          "skew": 0.9119
+        },
+        {
+          "target": "WIZ",
+          "n": 114,
+          "positive_rate": 0.7719,
+          "skew": 0.5439
+        },
+        {
+          "target": "IKZF1",
+          "n": 101,
+          "positive_rate": 0.7624,
+          "skew": 0.5248
+        },
+        {
+          "target": "IKZF2",
+          "n": 80,
+          "positive_rate": 0.9375,
+          "skew": 0.875
+        },
+        {
+          "target": "SALL4",
+          "n": 73,
+          "positive_rate": 0.5753,
+          "skew": 0.1507
+        },
+        {
+          "target": "IKZF3",
+          "n": 66,
+          "positive_rate": 0.8182,
+          "skew": 0.6364
+        },
+        {
+          "target": "KRAS",
+          "n": 57,
+          "positive_rate": 1.0,
+          "skew": 1.0
+        },
+        {
+          "target": "CDK4",
+          "n": 30,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "BRD4",
+          "n": 27,
+          "positive_rate": 0.5185,
+          "skew": 0.037
+        },
+        {
+          "target": "ARNT",
+          "n": 21,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "AR",
+          "n": 18,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "PTPN1",
+          "n": 16,
+          "positive_rate": 1.0,
+          "skew": 1.0
+        },
+        {
+          "target": "CDK2",
+          "n": 13,
+          "positive_rate": 1.0,
+          "skew": 1.0
+        },
+        {
+          "target": "CCNK",
+          "n": 11,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "BCL6",
+          "n": 10,
+          "positive_rate": 0.3,
+          "skew": 0.4
+        },
+        {
+          "target": "IKZF4",
+          "n": 3,
+          "positive_rate": 1.0,
+          "skew": 1.0
+        },
+        {
+          "target": "NEK7",
+          "n": 3,
+          "positive_rate": 1.0,
+          "skew": 1.0
+        },
+        {
+          "target": "VCL",
+          "n": 1,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        }
+      ]
+    },
+    "dmax": {
+      "ablation": {
+        "target_onehot_only": {
+          "val": 0.9073,
+          "test": 0.9076,
+          "n_features": 18
+        },
+        "maccs_only": {
+          "val": 0.9153,
+          "test": 0.925,
+          "n_features": 166
+        },
+        "maccs_plus_target": {
+          "val": 0.9576,
+          "test": 0.9646,
+          "n_features": 184
+        }
+      },
+      "similarity": {
+        "median_max_similarity": 0.8333,
+        "mean_max_similarity": 0.8254,
+        "frac_above_0.9": 0.2169,
+        "frac_above_0.7": 0.9036,
+        "bands": {
+          "near-duplicate (>=0.9)": {
+            "n": 108,
+            "roc_auc": 0.9668,
+            "accuracy": 0.9167
+          },
+          "close analog [0.7,0.9)": {
+            "n": 342,
+            "roc_auc": 0.9701,
+            "accuracy": 0.8889
+          },
+          "related [0.5,0.7)": {
+            "n": 33,
+            "roc_auc": 0.8566,
+            "accuracy": 0.8485
+          },
+          "distinct (<0.5)": {
+            "n": 15,
+            "roc_auc": 0.8462,
+            "accuracy": 0.9333
+          }
+        }
+      },
+      "target_skew": [
+        {
+          "target": "VAV1",
+          "n": 937,
+          "positive_rate": 0.9029,
+          "skew": 0.8058
+        },
+        {
+          "target": "IKZF2",
+          "n": 537,
+          "positive_rate": 0.7002,
+          "skew": 0.4004
+        },
+        {
+          "target": "GSPT1",
+          "n": 414,
+          "positive_rate": 0.0652,
+          "skew": 0.8696
+        },
+        {
+          "target": "CDK2",
+          "n": 387,
+          "positive_rate": 0.0129,
+          "skew": 0.9742
+        },
+        {
+          "target": "IKZF1",
+          "n": 332,
+          "positive_rate": 0.2319,
+          "skew": 0.5361
+        },
+        {
+          "target": "CSNK1A1",
+          "n": 162,
+          "positive_rate": 0.3765,
+          "skew": 0.2469
+        },
+        {
+          "target": "SMARCA2",
+          "n": 142,
+          "positive_rate": 0.493,
+          "skew": 0.0141
+        },
+        {
+          "target": "WIZ",
+          "n": 115,
+          "positive_rate": 0.9217,
+          "skew": 0.8435
+        },
+        {
+          "target": "WEE1",
+          "n": 64,
+          "positive_rate": 0.75,
+          "skew": 0.5
+        },
+        {
+          "target": "FBXW7",
+          "n": 60,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "SMARCA4",
+          "n": 52,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "SALL4",
+          "n": 45,
+          "positive_rate": 0.0222,
+          "skew": 0.9556
+        },
+        {
+          "target": "ARNT",
+          "n": 12,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "PTPN1",
+          "n": 7,
+          "positive_rate": 1.0,
+          "skew": 1.0
+        },
+        {
+          "target": "NEK7",
+          "n": 6,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "IKZF4",
+          "n": 3,
+          "positive_rate": 0.6667,
+          "skew": 0.3333
+        },
+        {
+          "target": "ZBTB11",
+          "n": 3,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        },
+        {
+          "target": "IKZF3",
+          "n": 2,
+          "positive_rate": 0.0,
+          "skew": 1.0
+        }
+      ]
+    }
+  }
+}

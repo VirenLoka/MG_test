@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- cached ESM embeddings ---
+# Regenerate with `python -m src.esm_embed`. Roughly 100 MB per checkpoint, so
+# these are derived artifacts and do not belong in git.
+cache/
+*.esm.pt
+esm_embeddings/
+
+# --- training artifacts ---
+# Checkpoints are large and reproducible from a config + seed.
+runs/
+outputs/
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+lightning_logs/
+tb_logs/
+events.out.tfevents.*
+wandb/
+
+# --- Hugging Face model downloads ---
+.cache/
+hf_cache/
+
+# --- notebooks ---
+.ipynb_checkpoints/
+
+# --- editors and OS ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

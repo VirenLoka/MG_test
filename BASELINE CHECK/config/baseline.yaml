@@ -1,0 +1,92 @@
+# Baseline configuration: MACCS fingerprint + target one-hot -> binary activity label.
+#
+# Two datasets are run independently, each producing a RandomForest and an
+# XGBoost classifier. Splits are grouped by canonical_smiles so that no
+# molecule is ever present in more than one of train/val/test.
+
+paths:
+  mg_data: MG_data
+  protein_map: MG_data/protein_structures_mapped.csv
+  outputs: BASELINE CHECK/outputs
+
+# Column names differ between the two source files, so each dataset carries
+# its own label/value column names.
+datasets:
+  dc50:
+    csv: MG_data/patglue_dc50_clean.csv
+    label_col: dc50_label
+    value_col: dc50_value_nM
+  dmax:
+    csv: MG_data/patglue_dmax_clean.csv
+    label_col: dmax_label
+    value_col: dmax_value_percent
+
+# Shared across both datasets.
+columns:
+  smiles: canonical_smiles
+  target: target
+  sequence: target_seq
+
+# Sequence lookup: protein_structures_mapped.csv keys on gene symbol.
+protein_map:
+  key: Gene_Name
+  sequence: FASTA_Sequence
+  uniprot: UniProt_ID
+
+split:
+  # Fractions of *groups* (unique SMILES), not of rows, so realised row
+  # fractions drift slightly from these numbers.
+  train: 0.70
+  val: 0.15
+  test: 0.15
+  group_by: canonical_smiles
+  seed: 42
+
+# Doubly-disjoint cross-validation (train_cv.py): targets partitioned into
+# n_folds, then scaffold-disjointness imposed on top by dropping conflicts.
+cv:
+  n_folds: 5
+  seed: 42
+  # AAC generalises to unseen targets; one-hot cannot represent one at all,
+  # so a target-disjoint evaluation requires a sequence-derived encoding.
+  target_encoding: aac
+  scaffold_col: scaffold
+  # With only 18-23 targets, the target-disjoint val fold can be a single
+  # target whose base rate is nothing like train's (e.g. 0.90 vs 0.25). Early
+  # stopping against such a val set halts XGBoost at a meaningless point and
+  # makes the RF/XGB comparison a comparison of val-fold luck. Fixed rounds
+  # instead, so both models see the same training signal.
+  xgb_early_stopping: false
+
+features:
+  # MACCSkeys.GenMACCSKeys returns 167 bits; bit 0 is a padding bit that is
+  # always unset. Dropping it costs nothing and keeps the matrix honest.
+  drop_maccs_bit0: true
+  # Target block for train_baselines.py (the molecule-disjoint run).
+  target_encoding: onehot
+  # One-hot encoder is fitted on the training split only. A target that never
+  # appears in train therefore encodes as an all-zero block in val/test,
+  # which is reported rather than silently patched.
+  onehot_fit_on: train
+
+models:
+  random_forest:
+    n_estimators: 500
+    max_depth: null
+    min_samples_leaf: 2
+    max_features: sqrt
+    class_weight: balanced
+    n_jobs: -1
+    random_state: 42
+  xgboost:
+    n_estimators: 600
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 2
+    reg_lambda: 1.0
+    eval_metric: logloss
+    early_stopping_rounds: 50
+    n_jobs: -1
+    random_state: 42

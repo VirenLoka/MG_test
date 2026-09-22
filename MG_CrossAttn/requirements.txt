@@ -1,0 +1,35 @@
+# MG_CrossAttn dependencies.
+#
+# torch, torch-geometric, transformers and rdkit are already present in the
+# tested environment (see README "Tested environment"); the pins below are the
+# versions this code was written and smoke-tested against.
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# For a CUDA build of torch, install torch FIRST from the official index, then
+# run this file, so pip does not replace it with the CPU wheel:
+#   pip install torch==2.5.0 --index-url https://download.pytorch.org/whl/cu121
+
+# --- core ---
+torch>=2.5.0,<2.8.0
+torch-geometric>=2.6.0,<3.0.0
+
+# --- protein language model (ESM-2 is loaded through transformers, not fair-esm) ---
+transformers>=4.51.0,<5.0.0
+tokenizers>=0.21.0
+safetensors>=0.5.0
+huggingface-hub>=0.30.0
+
+# --- cheminformatics ---
+rdkit>=2024.3.1
+
+# --- numerics, data, metrics ---
+numpy>=1.26.0,<2.0.0
+pandas>=2.0.0
+scikit-learn>=1.4.0
+scipy>=1.11.0
+
+# --- config and CLI ---
+PyYAML>=6.0
+tqdm>=4.66.0

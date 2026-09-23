@@ -272,7 +272,7 @@ def train_one_fold(fold_idx, splits, cfg, store, featurizer, device, fold_dir: P
     criterion = build_loss(cfg, datasets["train"], device)
 
     es = t["early_stopping"]
-    monitor, mode = es.get("monitor", "val_roc_auc"), es.get("mode", "max")
+    monitor, mode = es.get("monitor", "val_mcc"), es.get("mode", "max")
     metric_key = monitor.replace("val_", "")
     better = (lambda a, b: a > b + float(es.get("min_delta", 0.0))) if mode == "max" \
         else (lambda a, b: a < b - float(es.get("min_delta", 0.0)))
@@ -341,7 +341,7 @@ def train_one_fold(fold_idx, splits, cfg, store, featurizer, device, fold_dir: P
                 }
         else:
             bad_epochs += 1
-            if es.get("enabled", True) and bad_epochs >= int(es.get("patience", 10)):
+            if es.get("enabled", True) and bad_epochs >= int(es.get("patience", 10)) + 10:
                 log.info("  early stop at epoch %d (best %d)", epoch, best_epoch)
                 break
 

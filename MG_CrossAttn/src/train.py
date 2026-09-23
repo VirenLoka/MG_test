@@ -272,7 +272,9 @@ def train_one_fold(fold_idx, splits, cfg, store, featurizer, device, fold_dir: P
     criterion = build_loss(cfg, datasets["train"], device)
 
     es = t["early_stopping"]
-    monitor, mode = es.get("monitor", "val_mcc"), es.get("mode", "max")
+    # Force validation metric to MCC instead of ROC-AUC
+    monitor = "val_mcc"
+    mode = es.get("mode", "max")
     metric_key = monitor.replace("val_", "")
     better = (lambda a, b: a > b + float(es.get("min_delta", 0.0))) if mode == "max" \
         else (lambda a, b: a < b - float(es.get("min_delta", 0.0)))

@@ -63,22 +63,64 @@ featurizer:
   explicit_hydrogens: false
 
 # ---------------------------------------------------------------------------
-# Splits: targets partitioned into folds, then scaffold-disjointness imposed.
+# Splits: targets partitioned into folds, balanced on class ratio and size.
 # ---------------------------------------------------------------------------
 split:
   mode: target_disjoint_cv
   n_folds: 5
   seed: 42
-  scaffold_disjoint: true
-  # Paralogous targets share chemical series. Splitting a family across folds
-  # both destroys rows (SMARCA2/SMARCA4 share 235 dc50 scaffolds) and biases
-  # what survives, because only the family's non-shared chemistry remains.
-  # Each inner list is packed into one fold as a single unit.
+  # A molecule recurring across folds is paired with a *different* target each
+  # time, which is the point of a pairwise dataset rather than a leak. Enforcing
+  # scaffold-disjointness on top of target-disjointness therefore buys nothing
+  # and deletes rows non-uniformly (SMARCA2 kept 25.3% of its dc50 rows, and
+  # only its non-shared chemistry survived). Target-disjointness is always
+  # enforced and is not configurable.
+  scaffold_disjoint: false
+
+  # Which targets share a fold is the only lever on fold class ratio, because
+  # the label here is close to a function of the target (dc50 CSNK1A1 92.5%
+  # positive vs SMARCA4 15.9%; dmax VAV1 90.3% vs CDK2 1.3%). Packing by row
+  # count alone gave folds from 24% to 93% positive. This optimises ratio and
+  # size together, and never drops a row to do it.
+  balance:
+    enabled: true
+    # Fold size is a constraint, not a competing objective: a fold may hold
+    # between these multiples of its fair share (rows / n_folds), and inside
+    # that band the search chases the class ratio freely. Widening the band
+    # buys a tighter ratio and costs fold-size evenness - the frontier is
+    # steep and dataset-specific, so it is worth sweeping if you care. The
+    # ceiling is widened automatically if one target group exceeds it.
+    min_fold_row_frac: 0.40
+    max_fold_row_frac: 2.00
+    # Each fold is test once and val once, so a fold short of this many of
+    # either class makes ROC-AUC and MCC undefined there.
+    min_class_rows: 10
+    # Search effort. The partition is small (<=19 units into 5 folds) and the
+    # search is seeded and deterministic. At these settings it reaches the same
+    # partition as a 3000-restart reference on both datasets, from every seed
+    # tried, in 4-7s.
+    restarts: 24
+    sweeps: 60
+    # Random restarts land in the right basin for most bands but not all, so
+    # the incumbent is also kicked and re-descended.
+    kicks: 120
+    # Solve at progressively wider size bands, seeding each from the last.
+    # This is what actually finds the optimum: on dc50 a single-band search
+    # never reaches it however many kicks it is given, while three rungs get
+    # there with fewer.
+    anneal_rungs: 3
+
+  # Paralogous targets share chemical series, so splitting a family across
+  # folds would let the model see a near-identical (molecule, near-identical
+  # protein) pair in training. Each inner list is packed into one fold as a
+  # single unit. This costs the balancer some freedom - it has fewer, larger
+  # units to move - which is a deliberate trade.
   group_paralogs: true
   paralog_families:
     - [SMARCA2, SMARCA4]
     - [IKZF1, IKZF2, IKZF3, IKZF4]
-  # Ties when a scaffold straddles splits: the split earlier in this list wins.
+  # Ties when a scaffold straddles splits, if scaffold_disjoint is turned on:
+  # the split earlier in this list wins.
   scaffold_tie_priority: [train, val, test]
 
 # ---------------------------------------------------------------------------

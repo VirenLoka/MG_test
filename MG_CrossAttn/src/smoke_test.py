@@ -142,17 +142,58 @@ def main() -> int:
     )
     check("folds built", len(folds) == cfg["split"]["n_folds"], f"{len(folds)} folds")
 
+    # Targets must never straddle splits. Scaffolds and molecules may, unless
+    # scaffold_disjoint is on: the same glue against a different target is a
+    # distinct example, so checking those too would fail by design.
+    kinds = ["targets"]
+    if meta["scaffold_disjoint"]:
+        kinds += ["scaffolds", "smiles"]
+
     for i, (splits, report, audit) in enumerate(folds):
         if audit is None:
             continue
-        overlaps = audit["pairwise_overlap"]
-        leaked = {k: v for k, v in overlaps.items() if any(v.values())}
-        check(f"fold {i} disjoint", not leaked,
+        leaked = {
+            pair: {k: v[k] for k in kinds if v[k]}
+            for pair, v in audit["pairwise_overlap"].items()
+            if any(v[k] for k in kinds)
+        }
+        check(f"fold {i} target-disjoint", not leaked,
               f"test={audit['per_split']['test']['targets']} "
               f"retention={report['retention']:.1%}")
 
-    # Paralog families must land in one fold, which is the whole point of the fix.
-    fams = [f for f in cfg["split"]["paralog_families"]]
+    # Every row must survive: balancing is done by assignment, never by
+    # dropping rows, so anything short of full retention is a regression.
+    if not meta["scaffold_disjoint"]:
+        kept = [r["retention"] for _, r, a in folds if a is not None]
+        check("no rows dropped", all(r == 1.0 for r in kept), f"retention={set(kept)}")
+
+    # Fold class ratios: the balancer cannot beat the data, but it must at
+    # least not do worse than the row-count-only packing it replaced. With
+    # balancing off there is no comparison to draw - that packing *is* the
+    # result - so only report where the folds landed.
+    bal = meta["fold_balance"]
+    prior = bal.get("row_packing_baseline")
+    spread = bal.get("mixing", {}).get("mean_spread")
+    where = (
+        f"folds {bal['positive_rate_range'][0]:.0%}-{bal['positive_rate_range'][1]:.0%}, "
+        f"base {bal['overall_positive_rate']:.0%}"
+        + (f", mixing {spread:.0%}" if spread is not None else "")
+    )
+    if prior:
+        check(
+            "balancing does not worsen class ratio",
+            bal["max_deviation_from_base_rate"]
+            <= prior["max_deviation_from_base_rate"] + 1e-9,
+            f"{bal['max_deviation_from_base_rate']:.1%} vs "
+            f"{prior['max_deviation_from_base_rate']:.1%} ({where})",
+        )
+    else:
+        log.info("  ---   fold class ratio (balancing off): %s", where)
+
+    # Paralog families must land in one fold, which is the whole point of the
+    # fix - but only when grouping is on, since turning it off is exactly the
+    # request to scatter them.
+    fams = cfg["split"]["paralog_families"] if meta["paralog_grouping_enabled"] else []
     present = set(frame[d["target_col"]])
     for fam in fams:
         members = [m for m in fam if m in present]

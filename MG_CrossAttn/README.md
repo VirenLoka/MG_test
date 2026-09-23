@@ -119,43 +119,130 @@ covers the full surface — a selection:
 | `train.loss` | `class_weighting: balanced` sets `pos_weight` per fold; `label_smoothing` |
 | `train.early_stopping` | `monitor`, `mode`, `patience`, `min_delta` |
 | `split` | `n_folds`, `scaffold_disjoint`, `group_paralogs`, `paralog_families` |
+| `split.balance` | `min_fold_row_frac` / `max_fold_row_frac` (the fold-size band the class-ratio search works inside), `min_class_rows`, search effort |
 
 The fully-resolved config is written to `runs/<name>/resolved_config.yaml` on
 every run, so a result is always traceable to its exact settings.
 
 ## Splits
 
-Targets are partitioned into folds by greedy largest-first packing on row
-count. For fold *k*: test = fold *k*, val = fold *k+1*, train = the rest.
-Scaffold-disjointness is then imposed — a Bemis–Murcko scaffold straddling two
-splits goes to whichever split holds most of its rows, and its rows elsewhere
-are dropped. `audit_fold` re-derives all pairwise overlaps and **raises** on
-any shared target, scaffold, or SMILES.
+Targets are partitioned into folds, and every target lands in exactly one
+fold. For fold *k*: test = fold *k*, val = fold *k+1*, train = the rest.
+`audit_fold` re-derives all pairwise overlaps and **raises** on a shared
+target.
+
+**Scaffold-disjointness is off** (`split.scaffold_disjoint: false`). A molecule
+recurring across folds is paired with a *different* target in each, which is a
+distinct example rather than a leak — the pair is the unit of this dataset, not
+the molecule. Enforcing it on top of target-disjointness bought nothing and
+deleted rows non-uniformly. It is still available; `retention` in the fold
+report says what it costs when switched on.
+
+### Fold class ratios
+
+The label here is close to a function of the target:
+
+| dc50 (66.9% positive) | | dmax (49.6% positive) | |
+|---|---|---|---|
+| CSNK1A1 | 736 rows, 92.5% | VAV1 | 937 rows, 90.3% |
+| VAV1 | 816 rows, 90.3% | IKZF2 | 537 rows, 70.0% |
+| SMARCA2+SMARCA4 | 1096 rows, 24.2% | GSPT1 | 414 rows, 6.5% |
+| CDK4/ARNT/AR/CCNK | 80 rows, 0% | CDK2 | 387 rows, 1.3% |
+
+So a fold's positive rate is just whatever its targets' base rates average to.
+Packing folds by row count alone — what the baseline did — gave folds from 24%
+to 93% positive on dc50 and 4% to 90% on dmax, which makes ROC-AUC and MCC on
+the small end of that range close to meaningless.
+
+`assign_groups_to_folds` therefore picks *which targets share a fold* to
+optimise the class ratio, subject to fold size staying inside a band. It never
+drops a row. Fold size is a constraint rather than a competing objective
+because it has the larger dynamic range and, weighted against the ratio,
+silently dominates it.
+
+At the defaults, on the shipped configs:
+
+| | dc50 fold positive rates | dmax fold positive rates |
+|---|---|---|
+| packing by row count (before) | 24% – 93% | 7% – 90% |
+| **balanced (now)** | **43% – 89%** | **26% – 64%** |
+| fold sizes | 320 – 1537 rows | 263 – 1324 rows |
+| smallest fold class count | 204 pos / 86 neg | 70 pos / 161 neg |
+
+Every row is kept (`retention` is 1.0 on every fold), and no fold is
+single-class, so ROC-AUC and MCC are defined everywhere.
+
+The band is the knob, and the frontier is steep and dataset-specific
+(`split.balance.min_fold_row_frac` / `max_fold_row_frac`). Worst fold's
+distance from the base rate:
+
+| band | dc50 | dc50 fold sizes | dmax | dmax fold sizes |
+|---|---|---|---|---|
+| row count only | 42.8% | 681–1096 | 42.6% | 486–937 |
+| 0.6–1.5 | 37.1% | 484–1185 | 36.4% | 416–985 |
+| **0.4–2.0** (default) | **24.1%** | **320–1537** | **23.4%** | **263–1324** |
+| 0.35–2.4 | 14.7% | 281–1918 | 19.9% | 229–1345 |
+| 0.3–2.8 | 14.4% | 244–2023 | 11.3% | 201–1738 |
+
+The search reaches the same partition as a 3000-restart reference on both
+datasets from every seed tried, in 4–7 s.
+
+### Balance can be cosmetic — read the `spread` column
+
+A fold sitting on the base rate can be one of two very different things: a fold
+whose targets are each near it, or a fold pairing a 90%-positive target with a
+4%-positive one so they cancel. Both report the same fold ratio, but only the
+first is a harder test — in the second the label is still readable straight off
+target identity.
+
+`fold_balance.mixing` measures this as `spread`, the row-weighted mean gap
+between a fold's constituent target rates and the fold's own rate, and
+`train.py` logs it per fold. It rises as the band widens (dc50 4.2% → 21.9%),
+which is the real price of a tighter headline ratio. **This is a property of
+the data, not something the search can remove**: with a label this close to a
+function of the target, cancellation is the only mechanism available to a
+target-disjoint split.
+
+### The paralogy fix
 
 ### The paralogy fix
 
 The baseline split packed *individual* targets, which scattered paralogs across
 folds. Because paralogs share chemical series, the scaffold pass then destroyed
-a **biased** subsample of the smaller partner's rows:
+a **biased** subsample of the smaller partner's rows — SMARCA2 kept 125 of its
+494 dc50 rows (25.3%), and what survived was precisely its *non-shared*
+chemistry.
 
-| | baseline (individual targets) | here (families grouped) |
+That row loss is now moot, since the scaffold pass is off. The grouping stays
+for the reason that outlives it: SMARCA2 and SMARCA4 are near-identical
+proteins sharing 235 dc50 scaffolds, so splitting the family across folds would
+put a near-identical (molecule, near-identical protein) pair in both train and
+test. Grouping asks the better question — "can the model generalise to a new
+target **family**" rather than "to a paralog of a target it has already seen."
+
+It is not free, and now there is a price tag on it. Grouping IKZF1/2/3/4
+creates one indivisible block, and every such block is one the ratio balancer
+cannot break up. With `split.group_paralogs: false` the same balancer reaches
+much tighter fold ratios:
+
+| | grouped (default) | families split |
 |---|---|---|
-| SMARCA2/SMARCA4 shared scaffolds | 235, split across folds | same fold |
-| dc50 per-fold retention | 82.6 – 94.9% | **93.7 – 99.9%** |
-| dc50 SMARCA2 rows surviving as test | 125 of 494 (25.3%) | not fragmented |
+| dc50 fold rates | 43% – 89% | **62% – 71%** |
+| dmax fold rates | 26% – 64% | **33% – 64%** |
+| mean mixing spread | 14% / 23% | 26% / 30% |
 
-Worse than the row loss was its bias: what survived for SMARCA2 was precisely
-its *non-shared* chemistry. `split.paralog_families` packs each family as one
-unit, so a family's shared scaffolds never straddle a boundary.
+That is a real trade, not a free win: the tighter ratios come with more
+cancellation (see above), and splitting a family puts near-identical protein
+pairs on both sides of the boundary. The default stays `true` — but if fold
+class ratio is the binding problem, this is the largest single lever.
 
-This changes the question being asked, for the better: "can the model
-generalise to a new target **family**" rather than "to a paralog of a target it
-has already seen." It also makes folds coarser — grouping IKZF1/2/3/4 creates
-one large block, so target counts per fold become uneven even though row counts
-stay balanced.
-
-`dmax` additionally groups `CDK2`/`GSPT1`, which share 101 scaffolds without
-being paralogs; leaving them split cost CDK2 58% of its rows.
+`dmax` used to group `CDK2`/`GSPT1` as well. They are **not** paralogs — that
+grouping existed only to stop the scaffold pass costing CDK2 58% of its rows,
+and with the pass off it had no remaining job. It was also the single most
+expensive constraint on that dataset: together they are an indivisible 801-row
+block at 4.0% positive, a quarter of dmax, which pinned one fold at a 4.8%
+positive rate however the rest were arranged. Split apart (387 rows at 1.3%,
+414 at 6.5%) the worst dmax fold improves from 4.8% to 25% positive.
 
 ## Tested environment
 

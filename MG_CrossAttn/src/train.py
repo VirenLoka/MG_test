@@ -151,6 +151,58 @@ def smooth_labels(y: torch.Tensor, amount: float) -> torch.Tensor:
     return y * (1.0 - amount) + 0.5 * amount if amount > 0 else y
 
 
+def log_fold_balance(balance: dict) -> None:
+    """
+    Print what the fold balancer achieved, and how much of it is real.
+
+    The `spread` column is the one to read. A fold can sit on the base rate
+    either because its targets individually do, or because a 90%-positive
+    target is cancelling a 4%-positive one. Only the first makes the fold a
+    harder test; the second leaves the label readable straight off target
+    identity, so a high spread means the headline ratio is flattering.
+    """
+    base = balance["overall_positive_rate"]
+    lo, hi = balance["positive_rate_range"]
+    log.info(
+        "fold balance: %.1f%%-%.1f%% positive (base %.1f%%, max deviation %.1f%%)",
+        100 * lo, 100 * hi, 100 * base, 100 * balance["max_deviation_from_base_rate"],
+    )
+    if "size_band_relaxed" in balance:
+        r = balance["size_band_relaxed"]
+        log.warning(
+            "  size band widened %.2f -> %.2f: one target group holds %d rows",
+            r["requested"], r["applied"], r["forced_by_rows"],
+        )
+
+    prior = balance.get("row_packing_baseline")
+    if prior and prior.get("max_deviation_from_base_rate") is not None:
+        log.info(
+            "  (packing by row count alone would give %.1f%%-%.1f%%, deviation %.1f%%)",
+            100 * prior["positive_rate_range"][0], 100 * prior["positive_rate_range"][1],
+            100 * prior["max_deviation_from_base_rate"],
+        )
+
+    mixing = balance.get("mixing", {})
+    for fold in mixing.get("per_fold", []):
+        if fold.get("spread") is None:
+            continue
+        members = ", ".join(
+            f"{t} {100 * r:.0f}%" for t, r in list(fold["targets"].items())[:5]
+        )
+        log.info(
+            "  fold %d  %5d rows  %.0f%% positive  spread %.0f%%  [%s]",
+            fold["fold"], fold["rows"], 100 * fold["positive_rate"],
+            100 * fold["spread"], members,
+        )
+    if mixing.get("mean_spread") is not None:
+        log.info(
+            "  mean within-fold target-rate spread %.1f%% - the higher this is, "
+            "the more the fold ratios come from cancelling extremes rather than "
+            "from balanced targets",
+            100 * mixing["mean_spread"],
+        )
+
+
 # --------------------------------------------------------------------------
 # train / evaluate one fold
 # --------------------------------------------------------------------------
@@ -372,7 +424,9 @@ def main() -> int:
     )
     log.info("split: %d folds, rows per fold %s", split_meta["n_folds"],
              split_meta["rows_per_fold"])
-    log.info("paralog grouping: %s", split_meta["paralog_grouping_enabled"])
+    log.info("paralog grouping: %s  scaffold-disjoint: %s",
+             split_meta["paralog_grouping_enabled"], split_meta["scaffold_disjoint"])
+    log_fold_balance(split_meta["fold_balance"])
 
     wanted = args.folds if args.folds is not None else list(range(len(folds)))
     results, started = [], time.time()

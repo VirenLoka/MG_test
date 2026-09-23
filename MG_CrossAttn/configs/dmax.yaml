@@ -23,9 +23,14 @@ model:
     dropout: 0.3
 
 split:
+  # CDK2 and GSPT1 were previously pinned together here. They are not paralogs
+  # - the grouping existed only because they share 101 scaffolds, which cost
+  # CDK2 58% of its rows once scaffold-disjointness was imposed. With that off
+  # (see base.yaml) nothing is dropped, so the grouping has no remaining job,
+  # and it was an expensive one: together they are an indivisible 801-row block
+  # at 4.0% positive, a quarter of the dataset, which pinned one fold at a 4.8%
+  # positive rate no matter how the rest were arranged. Split apart they are
+  # 387 rows at 1.3% and 414 at 6.5%, which the balancer can place separately.
   paralog_families:
     - [SMARCA2, SMARCA4]
     - [IKZF1, IKZF2, IKZF3, IKZF4]
-    # dmax additionally has CDK2 and GSPT1 sharing 101 scaffolds despite not
-    # being paralogs; keeping them together prevents a 58% row loss on CDK2.
-    - [CDK2, GSPT1]

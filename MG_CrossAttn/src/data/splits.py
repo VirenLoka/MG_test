@@ -2,14 +2,24 @@
 """
 Target-disjoint cross-validation folds, balanced on class ratio and size.
 
-Every target lands in exactly one fold, so a fold always answers "can the model
-generalise to a target it has never seen". A molecule may recur across folds
-provided it is paired with a different target each time; that is the whole
-point of a pairwise dataset and is not leakage, so scaffold-disjointness is
-off by default (`scaffold_disjoint`). It remains available, but note what it
-costs: it deletes rows, and it deletes them non-uniformly - under the baseline
-split SMARCA2 retained only 25.3% of its dc50 rows, and what survived was
-precisely its non-shared chemistry.
+Each of the `n_folds` splits is 80% train / 10% val / 10% test: one fold is
+held out whole, the other four are train, and the held-out fold is cut in half
+by rows to give val and test. Every target lands in exactly one fold, so no
+train target appears in val or test and a fold always answers "can the model
+generalise to a target it has never seen".
+
+Val and test therefore *share* targets. That is deliberate - see `make_fold`
+for why cutting the held-out fold by target instead does not work here - and it
+means early stopping is tuned on the same targets that are then scored. Note
+also that with test at 10% per fold, the five test sets cover half the dataset
+rather than tiling all of it.
+
+A molecule may recur across folds provided it is paired with a different target
+each time; that is the whole point of a pairwise dataset and is not leakage, so
+scaffold-disjointness is off by default (`scaffold_disjoint`). It remains
+available, but note what it costs: it deletes rows, and it deletes them
+non-uniformly - under the baseline split SMARCA2 retained only 25.3% of its
+dc50 rows, and what survived was precisely its non-shared chemistry.
 
 The harder problem here is class ratio. In this data the label is close to a
 function of the target - dc50 CSNK1A1 is 92.5% positive, SMARCA4 15.9%; dmax
@@ -128,6 +138,10 @@ DEFAULT_BALANCE = {
 _BAND_PENALTY = 100.0
 _FLOOR_PENALTY = 10.0
 
+# The held-out fold is split into val and test, so fold-level counts are
+# halved before either split sees them.
+_VAL_TEST_HALVES = 2
+
 
 def _fold_totals(
     rows_of_group: np.ndarray, pos_of_group: np.ndarray, assign: np.ndarray, n_folds: int
@@ -181,7 +195,9 @@ def partition_cost(
     over = np.maximum(0.0, rows - hi) / fair
     band = float(np.sum(np.square(under)) + np.sum(np.square(over)))
 
-    floor = max(int(cfg["min_class_rows"]), 0)
+    # The held-out fold is halved into val and test, so a fold needs twice the
+    # per-split floor for both halves to clear it.
+    floor = max(int(cfg["min_class_rows"]), 0) * _VAL_TEST_HALVES
     if floor and strict:
         held = np.where(filled, np.minimum(pos, rows - pos), floor)
         deficit = np.maximum(0, floor - held) / floor
@@ -309,17 +325,34 @@ def assign_groups_to_folds(
         report = _balance_report(rows, pos, overall, balanced=False)
         return {g: int(by_size[i]) for i, g in enumerate(groups)}, rows, report
 
-    # A group larger than the ceiling makes the band unsatisfiable on its own,
-    # and every partition then pays the same floor of penalty, which flattens
-    # the ratio signal the search is supposed to follow. Widen to fit instead.
+    # An unsatisfiable band is worse than a loose one: every partition pays the
+    # same floor of penalty, which flattens the ratio signal the search is
+    # supposed to follow. So widen it to the tightest band the data can
+    # actually satisfy, at both ends.
+    #
+    # The ceiling cannot sit below the largest indivisible group. And once one
+    # fold is that large, the other n-1 share what is left, so the floor cannot
+    # sit above their average either - asking for equal folds here is
+    # self-contradictory, not merely ambitious.
     fair = float(rows_of_group.sum()) / n_folds
     needed = float(rows_of_group.max()) / fair
-    relaxed = None
+    headroom = (n_folds - needed) / (n_folds - 1) if n_folds > 1 else needed
+
+    relaxed = {}
     if needed > float(cfg["max_fold_row_frac"]):
-        relaxed = {"requested": float(cfg["max_fold_row_frac"]),
-                   "applied": round(needed, 4),
-                   "forced_by_rows": int(rows_of_group.max())}
+        relaxed["max_fold_row_frac"] = {
+            "requested": float(cfg["max_fold_row_frac"]),
+            "applied": round(needed, 4),
+            "forced_by": f"{int(rows_of_group.max())} rows in one target group",
+        }
         cfg = {**cfg, "max_fold_row_frac": needed}
+    if headroom < float(cfg["min_fold_row_frac"]):
+        relaxed["min_fold_row_frac"] = {
+            "requested": float(cfg["min_fold_row_frac"]),
+            "applied": round(headroom, 4),
+            "forced_by": f"the other {n_folds - 1} folds share what is left",
+        }
+        cfg = {**cfg, "min_fold_row_frac": headroom}
 
     def constructive(band: dict) -> np.ndarray:
         """Largest-first, each group into whichever fold leaves the partition
@@ -505,6 +538,45 @@ def _balance_report(
     }
 
 
+def _halve_stratified(
+    frame: pd.DataFrame, target_col: str, label_col: str, seed: int
+) -> np.ndarray:
+    """
+    Label the held-out fold's rows "val"/"test" in equal, matched halves.
+
+    Rows are shuffled and dealt alternately *within* each (target, label) cell,
+    so both halves inherit the fold's target mix and class ratio rather than
+    merely its size. Dealing alternately instead of slicing at the midpoint
+    matters for the many small cells here: a 3-row cell splits 2/1 rather than
+    landing entirely on one side, which is what keeps a fold of several tiny
+    targets from drifting.
+
+    The leftover of every odd cell is dealt to whichever half is smaller so far,
+    so the halves stay within one row of each other overall instead of
+    accumulating every remainder on the same side.
+    """
+    rng = np.random.default_rng(seed)
+    out = np.empty(len(frame), dtype=object)
+    positions = {key: i for i, key in enumerate(frame.index)}
+    counts = {"val": 0, "test": 0}
+
+    cells = frame.groupby([target_col, label_col], sort=True, observed=True).indices
+    for key in sorted(cells, key=lambda k: (str(k[0]), k[1])):
+        rows = frame.index[cells[key]].to_numpy()
+        rng.shuffle(rows)
+        # Start each cell on the half that is currently behind, so remainders
+        # alternate rather than always favouring "val".
+        first, second = (
+            ("val", "test") if counts["val"] <= counts["test"] else ("test", "val")
+        )
+        for n, row in enumerate(rows):
+            side = first if n % 2 == 0 else second
+            out[positions[row]] = side
+            counts[side] += 1
+
+    return out
+
+
 def make_fold(
     df: pd.DataFrame,
     fold: int,
@@ -513,11 +585,26 @@ def make_fold(
     n_folds: int,
     target_col: str,
     scaffold_col: str,
+    label_col: str,
     scaffold_disjoint: bool = False,
     tie_priority: tuple[str, ...] = SPLIT_NAMES,
+    seed: int = 0,
 ) -> tuple[dict[str, pd.DataFrame], dict]:
     """
-    Build one split. test = fold, val = fold+1, train = the rest.
+    Build one split: 80% train / 10% val / 10% test.
+
+    Fold `fold` is held out whole and the other four folds are train, so no
+    target in train appears in val or test. The held-out fold is then cut in
+    half by rows, stratified within each (target, label) cell, which gives val
+    and test the same size, the same target mix and the same class ratio as
+    each other - none of which survives cutting the fold up by target instead,
+    because a fold's targets differ wildly in size and class rate (dc50 fold 0
+    is VAV1, 816 rows at 90% positive, plus CCNK, 11 rows at 0%) and some folds
+    hold only one target.
+
+    The consequence to keep in mind is that val and test share targets, so
+    early stopping is tuned on the same targets that are then scored. Both are
+    still target-disjoint from train, which is the claim the CV rests on.
 
     Off by default, `scaffold_disjoint` assigns a scaffold straddling two
     splits to whichever split holds most of its rows (ties by `tie_priority`)
@@ -525,22 +612,19 @@ def make_fold(
     folds is paired with a different target in each - and costs real rows, so
     `retention` is worth reading whenever it is switched on.
     """
-    test_fold, val_fold = fold, (fold + 1) % n_folds
-
-    def split_of_target(target: str) -> str:
-        k = fold_of_group[group_of[target]]
-        if k == test_fold:
-            return "test"
-        if k == val_fold:
-            return "val"
-        return "train"
-
     work = df.copy()
-    work["_split"] = work[target_col].map(split_of_target)
+    held_out = work[target_col].map(
+        lambda t: fold_of_group[group_of[t]] == fold
+    ).to_numpy()
+
+    work["_split"] = np.where(held_out, "val", "train")
+    work.loc[held_out, "_split"] = _halve_stratified(
+        work.loc[held_out], target_col, label_col, seed + fold
+    )
 
     report: dict = {
-        "test_fold": test_fold,
-        "val_fold": val_fold,
+        "held_out_fold": fold,
+        "train_folds": [k for k in range(n_folds) if k != fold],
         "rows_before": int(len(work)),
         "scaffold_disjoint": scaffold_disjoint,
     }
@@ -581,8 +665,12 @@ def audit_fold(
     """
     Verify disjointness and summarise the split. Raises on any leak.
 
-    Target-disjointness is always enforced - it is the claim the whole CV rests
-    on. Scaffold and SMILES overlap is always measured but only enforced under
+    Target-disjointness is enforced against `train` - it is the claim the whole
+    CV rests on. It is deliberately *not* enforced between val and test: they
+    are two stratified halves of the same held-out fold, so sharing targets is
+    the design. Their overlap is still measured and reported.
+
+    Scaffold and SMILES overlap is always measured but only enforced under
     `require_scaffold_disjoint`, since a molecule recurring against a different
     target is the intended behaviour, not a leak.
     """
@@ -596,6 +684,8 @@ def audit_fold(
         for b in names[i + 1:]:
             entry = {k: len(sets[a][k] & sets[b][k]) for k in kinds}
             overlaps[f"{a}|{b}"] = entry
+            if "train" not in (a, b):
+                continue
             checked = kinds if require_scaffold_disjoint else ["targets"]
             if any(entry[k] for k in checked):
                 leaks[f"{a}|{b}"] = entry
@@ -653,8 +743,9 @@ def build_cv_folds(
     for fold in range(n_folds):
         splits, report = make_fold(
             frame, fold, fold_of_group, group_of, n_folds,
-            target_col, scaffold_col,
+            target_col, scaffold_col, label_col,
             scaffold_disjoint=scaffold_disjoint, tie_priority=tie_priority,
+            seed=int(cfg["seed"]),
         )
         if any(len(splits[s]) == 0 for s in SPLIT_NAMES):
             report["skipped"] = "a split came out empty"

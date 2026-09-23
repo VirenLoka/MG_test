@@ -3,7 +3,8 @@
 Graph attention transformer over the molecular glue, frozen ESM-2 embeddings
 for the target protein, bidirectional cross-attention between the two, and a
 binary classifier on top. Built for the `dc50` and `dmax` PatGlue datasets
-under target- and scaffold-disjoint cross-validation.
+under target-disjoint 5-fold cross-validation, 80/10/10 per fold, with fold
+class ratios balanced by target assignment.
 
 ```
 SMILES ──► graph ──► GraphAttentionTransformer ──► atom embeddings   [B, Na, D]
@@ -38,6 +39,11 @@ set immediately. This is a data limitation, not a knob worth exposing.
 
 **Paralog families are kept in the same fold.** This fixes a bug in the
 baseline split — see [Splits](#splits).
+
+**Fold size is the val/test size.** val and test are the two halves of the
+held-out fold, so the fold-size band in `split.balance` sets the split ratio
+and the class-ratio freedom at the same time. The shipped configs favour the
+ratio; widening the band buys balance back — see [Splits](#splits).
 
 ## Setup
 
@@ -126,10 +132,48 @@ every run, so a result is always traceable to its exact settings.
 
 ## Splits
 
-Targets are partitioned into folds, and every target lands in exactly one
-fold. For fold *k*: test = fold *k*, val = fold *k+1*, train = the rest.
-`audit_fold` re-derives all pairwise overlaps and **raises** on a shared
-target.
+Each of the 5 splits is **80% train / 10% val / 10% test**. Targets are
+partitioned into folds and every target lands in exactly one fold; for fold
+*k*, fold *k* is held out whole and the other four are train. The held-out
+fold is then cut in half by rows — stratified within each (target, label)
+cell — to give val and test. `audit_fold` re-derives all pairwise overlaps and
+**raises** on a target shared with train.
+
+Two consequences of cutting one fold in half, both deliberate:
+
+- **val and test share targets.** Cutting the held-out fold by *target*
+  instead does not work here: dc50 fold 1 holds one target (GSPT1), so it
+  cannot be halved at all, and where folds do hold several, the targets differ
+  wildly in size and class rate — dc50 fold 0 is VAV1 (816 rows, 90% positive)
+  plus CCNK (11 rows, 0%), which a target-cut would turn into an 816/11 split
+  with one half single-class. The stratified row cut instead gives val and test
+  the same size (to within one row), the same target mix and the same class
+  ratio. The price is that early stopping is tuned on the same targets that are
+  then scored. Both halves remain target-disjoint from train, which is the
+  claim the CV rests on.
+- **the 5 test sets cover half the dataset**, not all of it, since each is 10%.
+
+### Why it is not exactly 80/10/10
+
+It cannot be. val and test are each half a fold, so hitting 10%/10% needs every
+fold at exactly 20% of the data — but the largest indivisible target group is
+bigger than that:
+
+| | largest group | share | forces val/test to at least |
+|---|---|---|---|
+| dc50 | SMARCA2+SMARCA4 | 1096 rows, 27.3% | 13.7% each |
+| dmax | VAV1 (a single target) | 937 rows, 28.6% | 14.3% each |
+
+And once one fold is that large, the other four share what is left, so they
+fall *below* 20%. Asking for equal folds is therefore self-contradictory rather
+than merely ambitious, and `assign_groups_to_folds` widens the requested band
+at **both** ends to the tightest the data admits, logging what it settled on.
+The shipped configs ask for `1.00`/`1.00` and get:
+
+| | fold sizes | realised train/val/test |
+|---|---|---|
+| dc50 | 0.91 – 1.37× fair | 73–83% / 8.5–13.7% / 8.5–13.7% |
+| dmax | 0.89 – 1.43× fair | 71–85% / 7.4–14.3% / 7.4–14.3% |
 
 **Scaffold-disjointness is off** (`split.scaffold_disjoint: false`). A molecule
 recurring across folds is paired with a *different* target in each, which is a
@@ -160,29 +204,36 @@ drops a row. Fold size is a constraint rather than a competing objective
 because it has the larger dynamic range and, weighted against the ratio,
 silently dominates it.
 
-At the defaults, on the shipped configs:
+### The band trades split ratio against class balance — directly
 
-| | dc50 fold positive rates | dmax fold positive rates |
-|---|---|---|
-| packing by row count (before) | 24% – 93% | 7% – 90% |
-| **balanced (now)** | **43% – 89%** | **26% – 64%** |
-| fold sizes | 320 – 1537 rows | 263 – 1324 rows |
-| smallest fold class count | 204 pos / 86 neg | 70 pos / 161 neg |
+Because fold size *is* val/test size, the band is a single knob with the split
+ratio at one end and the class ratio at the other. **The shipped configs sit at
+the ratio end, and that costs nearly all of the balancing**: at `1.00`/`1.00`
+the balancer has so little freedom that it lands on the same partition
+row-count packing alone would give.
 
-Every row is kept (`retention` is 1.0 on every fold), and no fold is
-single-class, so ROC-AUC and MCC are defined everywhere.
-
-The band is the knob, and the frontier is steep and dataset-specific
-(`split.balance.min_fold_row_frac` / `max_fold_row_frac`). Worst fold's
-distance from the base rate:
-
-| band | dc50 | dc50 fold sizes | dmax | dmax fold sizes |
+| band | dc50 val/test | dc50 fold rates | dmax val/test | dmax fold rates |
 |---|---|---|---|---|
-| row count only | 42.8% | 681–1096 | 42.6% | 486–937 |
-| 0.6–1.5 | 37.1% | 484–1185 | 36.4% | 416–985 |
-| **0.4–2.0** (default) | **24.1%** | **320–1537** | **23.4%** | **263–1324** |
-| 0.35–2.4 | 14.7% | 281–1918 | 19.9% | 229–1345 |
-| 0.3–2.8 | 14.4% | 244–2023 | 11.3% | 201–1738 |
+| **1.00–1.00 (shipped)** | **8.5 – 13.7%** | **24 – 93%** | **7.4 – 14.3%** | **7 – 90%** |
+| 0.70–1.50 | 7.0 – 14.8% | 30 – 88% | 7.0 – 14.6% | 20 – 86% |
+| 0.60–1.60 | 6.0 – 16.0% | 30 – 88% | 6.1 – 15.5% | 17 – 83% |
+| 0.50–1.80 | 5.0 – 18.0% | 40 – 88% | 5.4 – 16.2% | 17 – 80% |
+| 0.40–2.00 | 4.0 – 19.2% | 43 – 89% | 4.0 – 20.2% | 26 – 64% |
+
+Two rows worth noting at the shipped setting: dmax fold 2 is 7% positive, so
+its val and test each hold **17 positives against ~227 negatives** — PR-AUC and
+MCC there will be very noisy. dc50 fold 0 is 24% positive.
+
+To buy the balance back, widen the band — it is one line:
+
+```bash
+python -m src.train --config configs/dmax.yaml \
+    --set split.balance.min_fold_row_frac=0.4 split.balance.max_fold_row_frac=2.0
+```
+
+Every row is kept at any band (`retention` is 1.0 on every fold), and the
+`min_class_rows` floor — applied per val/test split, so twice that at fold
+level — keeps every split two-class, so ROC-AUC and MCC are always defined.
 
 The search reaches the same partition as a 3000-restart reference on both
 datasets from every seed tried, in 4–7 s.
@@ -197,8 +248,9 @@ target identity.
 
 `fold_balance.mixing` measures this as `spread`, the row-weighted mean gap
 between a fold's constituent target rates and the fold's own rate, and
-`train.py` logs it per fold. It rises as the band widens (dc50 4.2% → 21.9%),
-which is the real price of a tighter headline ratio. **This is a property of
+`train.py` logs it per fold. It rises as the band widens (dc50 4.2% at the
+shipped setting → 21.9% at 0.3–2.8), which is the real price of a tighter
+headline ratio. **This is a property of
 the data, not something the search can remove**: with a label this close to a
 function of the target, cancellation is the only mechanism available to a
 target-disjoint split.

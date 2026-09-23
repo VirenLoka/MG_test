@@ -64,6 +64,10 @@ featurizer:
 
 # ---------------------------------------------------------------------------
 # Splits: targets partitioned into folds, balanced on class ratio and size.
+# Each fold is 80/10/10 train/val/test - one fold is held out whole and cut in
+# half by rows to give val and test, the other four folds are train. Val and
+# test share targets (they are two halves of one fold) but neither shares a
+# target with train.
 # ---------------------------------------------------------------------------
 split:
   mode: target_disjoint_cv
@@ -86,14 +90,27 @@ split:
     enabled: true
     # Fold size is a constraint, not a competing objective: a fold may hold
     # between these multiples of its fair share (rows / n_folds), and inside
-    # that band the search chases the class ratio freely. Widening the band
-    # buys a tighter ratio and costs fold-size evenness - the frontier is
-    # steep and dataset-specific, so it is worth sweeping if you care. The
-    # ceiling is widened automatically if one target group exceeds it.
-    min_fold_row_frac: 0.40
-    max_fold_row_frac: 2.00
-    # Each fold is test once and val once, so a fold short of this many of
-    # either class makes ROC-AUC and MCC undefined there.
+    # that band the search chases the class ratio freely.
+    #
+    # These are set to demand equal folds, because fold size *is* the val/test
+    # size: val and test are each half a fold, so a fold at 1.00x its fair
+    # share gives exactly the 10%/10% split. Equal folds are not actually
+    # attainable here - dc50's SMARCA2+SMARCA4 is one indivisible 1096-row
+    # group, 1.37x a fair fold - so both ends are widened automatically to the
+    # tightest band the data admits, and the run logs what it settled on
+    # (dc50 0.91-1.37 -> val/test 9.1%-13.7%; dmax 0.89-1.43 -> 8.9%-14.3%).
+    #
+    # This prioritises the split ratio over class balance, and the cost is
+    # steep: at this width the balancer has almost no freedom left, and fold
+    # class ratios fall back to roughly what row-count packing alone gives
+    # (dc50 24%-93% positive, dmax 7%-90%). Widen the band to buy that back -
+    # 0.60/1.60 gives dmax 17%-83%, and 0.40/2.00 gives 26%-64%, at val/test
+    # of 6.1%-15.5% and 4.0%-20.2% respectively.
+    min_fold_row_frac: 1.00
+    max_fold_row_frac: 1.00
+    # Minimum rows of each class in *each* val/test split. The held-out fold
+    # is halved into the two, so the balancer requires twice this at fold
+    # level. Below it, ROC-AUC and MCC are undefined or meaningless there.
     min_class_rows: 10
     # Search effort. The partition is small (<=19 units into 5 folds) and the
     # search is seeded and deterministic. At these settings it reaches the same

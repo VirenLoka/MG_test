@@ -142,9 +142,11 @@ def main() -> int:
     )
     check("folds built", len(folds) == cfg["split"]["n_folds"], f"{len(folds)} folds")
 
-    # Targets must never straddle splits. Scaffolds and molecules may, unless
+    # No target may cross into train. Scaffolds and molecules may, unless
     # scaffold_disjoint is on: the same glue against a different target is a
-    # distinct example, so checking those too would fail by design.
+    # distinct example, so checking those too would fail by design. val|test is
+    # exempt entirely - they are two halves of one held-out fold and share
+    # targets on purpose.
     kinds = ["targets"]
     if meta["scaffold_disjoint"]:
         kinds += ["scaffolds", "smiles"]
@@ -155,11 +157,27 @@ def main() -> int:
         leaked = {
             pair: {k: v[k] for k in kinds if v[k]}
             for pair, v in audit["pairwise_overlap"].items()
-            if any(v[k] for k in kinds)
+            if "train" in pair.split("|") and any(v[k] for k in kinds)
         }
-        check(f"fold {i} target-disjoint", not leaked,
+        check(f"fold {i} train-disjoint", not leaked,
               f"test={audit['per_split']['test']['targets']} "
               f"retention={report['retention']:.1%}")
+
+    # val and test are halves of one fold, so they must match each other in
+    # size and class ratio - that matching is the whole reason for cutting by
+    # stratified rows rather than by target. Not checkable under
+    # scaffold_disjoint, which runs after the cut and deletes from the two
+    # halves unevenly; that asymmetry is one more thing it costs.
+    for i, (splits, report, audit) in enumerate(folds):
+        if audit is None or meta["scaffold_disjoint"]:
+            continue
+        v, t = audit["per_split"]["val"], audit["per_split"]["test"]
+        check(
+            f"fold {i} val/test halves match",
+            abs(v["rows"] - t["rows"]) <= 1
+            and abs(v["positive_rate"] - t["positive_rate"]) < 0.02,
+            f"{v['rows']}r @{v['positive_rate']:.1%} vs {t['rows']}r @{t['positive_rate']:.1%}",
+        )
 
     # Every row must survive: balancing is done by assignment, never by
     # dropping rows, so anything short of full retention is a regression.

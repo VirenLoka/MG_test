@@ -167,11 +167,17 @@ def log_fold_balance(balance: dict) -> None:
         "fold balance: %.1f%%-%.1f%% positive (base %.1f%%, max deviation %.1f%%)",
         100 * lo, 100 * hi, 100 * base, 100 * balance["max_deviation_from_base_rate"],
     )
-    if "size_band_relaxed" in balance:
-        r = balance["size_band_relaxed"]
+    for key, r in balance.get("size_band_relaxed", {}).items():
         log.warning(
-            "  size band widened %.2f -> %.2f: one target group holds %d rows",
-            r["requested"], r["applied"], r["forced_by_rows"],
+            "  %s widened %.2f -> %.2f (%s)",
+            key, r["requested"], r["applied"], r["forced_by"],
+        )
+    if balance.get("size_band"):
+        lo_b, hi_b = balance["size_band"]
+        log.info(
+            "  fold sizes held to %.2f-%.2fx the fair share, so val and test are "
+            "%.1f%%-%.1f%% of the data each",
+            lo_b, hi_b, 100 * lo_b / 10, 100 * hi_b / 10,
         )
 
     prior = balance.get("row_packing_baseline")
